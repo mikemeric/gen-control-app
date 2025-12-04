@@ -1,147 +1,278 @@
 import streamlit as st
-import time
+from streamlit_gsheets import GSheetsConnection
+import pandas as pd
+from datetime import datetime
+import urllib.parse
 
 # ==========================================
-# 1. CONFIGURATION "POLICE & SÉCURITÉ"
+# 1. CONFIGURATION & STYLE
 # ==========================================
 st.set_page_config(
-    page_title="GEN-CONTROL | Anti-Vol",
-    page_icon="🔒",
-    layout="centered", 
+    page_title="GEN-CONTROL V2",
+    page_icon="🛡️",
+    layout="centered",
     initial_sidebar_state="collapsed"
 )
 
-# --- CSS DESIGN (ZARA) ---
+# Style CSS pour cacher les éléments inutiles et styliser les alertes
 st.markdown("""
 <style>
-    .stApp { background-color: #0F172A; color: #F1F5F9; }
-    h1 { color: #38BDF8; text-align: center; font-weight: 900; text-transform: uppercase; }
-    .stNumberInput input, .stTextInput input { background-color: #1E293B; color: white; border: 2px solid #475569; border-radius: 8px; font-size: 20px; text-align: center; }
-    div.stButton > button[kind="primary"] { background: linear-gradient(180deg, #EAB308 0%, #CA8A04 100%); color: black; font-size: 24px; height: 3em; width: 100%; border: none; border-radius: 10px; font-weight: 900; box-shadow: 0 4px 0 #854D0E; }
-    div.stButton > button[kind="primary"]:active { transform: translateY(4px); box-shadow: none; }
-    .result-card { background-color: #1E293B; padding: 20px; border-radius: 10px; border: 1px solid #334155; text-align: center; margin-bottom: 10px; }
-    .lock-screen { padding: 20px; border: 2px dashed #475569; border-radius: 10px; text-align: center; background-color: #1e293b; margin-top: 20px;}
+    .stDeployButton {display:none;}
+    .block-container {padding-top: 2rem;}
+    div[data-testid="stMetricValue"] {font-size: 1.8rem;}
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 2. SYSTÈME DE VERROUILLAGE (AXEL)
+# 2. CONNEXION DATABASE (GOOGLE SHEETS)
+# ==========================================
+try:
+    conn = st.connection("gsheets", type=GSheetsConnection)
+except Exception as e:
+    st.error("⚠️ Erreur de connexion au serveur sécurisé. Vérifiez votre internet.")
+    st.stop()
+
+# ==========================================
+# 3. GESTION DE L'ÉTAT (SESSION STATE)
+# ==========================================
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+if 'user_info' not in st.session_state:
+    st.session_state.user_info = {}
+if 'audit_result' not in st.session_state:
+    st.session_state.audit_result = None
+
+# ==========================================
+# 4. FONCTIONS UTILITAIRES (MOUCHARD)
 # ==========================================
 
-# --- DÉFINIR LE MOT DE PASSE ICI ---
-MOT_DE_PASSE_SECRET = "GEN2025" 
-# (C'est ce code que vous donnerez au client après paiement)
+def log_action(code, action, details="-"):
+    """Enregistre une action dans l'onglet 'logs'"""
+    try:
+        df_logs = conn.read(worksheet="logs", ttl=0, usecols=[0, 1, 2, 3])
+        new_entry = pd.DataFrame([{
+            "date_heure": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "code_utilise": code,
+            "action": action,
+            "details": details
+        }])
+        updated_logs = pd.concat([df_logs, new_entry], ignore_index=True)
+        conn.update(worksheet="logs", data=updated_logs)
+    except Exception:
+        pass # On ne bloque pas l'appli si le log échoue
 
-def check_password():
-    """Retourne True si l'utilisateur est connecté"""
-    if "authenticated" not in st.session_state:
-        st.session_state.authenticated = False
+def check_login(code_input):
+    """Vérifie le code dans l'onglet 'users'"""
+    try:
+        df_users = conn.read(worksheet="users", ttl=0, usecols=[0, 1, 2, 3])
+        # Nettoyage des espaces et conversion en string
+        df_users['code_acces'] = df_users['code_acces'].astype(str).str.strip()
         
-    if st.session_state.authenticated:
-        return True
+        user_row = df_users[
+            (df_users['code_acces'] == code_input) & 
+            (df_users['statut'] == 'ACTIF')
+        ]
         
-    st.title("🔒 ACCÈS RESTREINT")
-    st.markdown("<div style='text-align: center;'>Logiciel Anti-Vol Carburant</div>", unsafe_allow_html=True)
+        if not user_row.empty:
+            return True, user_row.iloc[0]['client_nom'], user_row.iloc[0]['vendeur']
+        else:
+            return False, None, None
+    except Exception as e:
+        st.error(f"Erreur système : {e}")
+        return False, None, None
+
+# ==========================================
+# 5. ÉCRAN 1 : LE BUNKER (LOGIN)
+# ==========================================
+
+if not st.session_state.authenticated:
+    st.title("🔒 SÉCURITÉ ÉNERGÉTIQUE")
+    st.caption("Cabinet DI-SOLUTIONS | GEN-CONTROL V2")
+    st.markdown("---")
     
-    # Zone de Login
+    st.info("Accès réservé aux clients audités. Entrez votre Code Licence.")
+    
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        code_input = st.text_input("Code Licence", placeholder="Ex: GEN-2025-X").strip()
+    
+    if st.button("Déverrouiller l'accès 🔓", type="primary", use_container_width=True):
+        if code_input:
+            with st.spinner("Authentification en cours..."):
+                is_valid, client_name, vendeur = check_login(code_input)
+                
+                if is_valid:
+                    st.session_state.authenticated = True
+                    st.session_state.user_info = {
+                        "code": code_input, 
+                        "nom": client_name,
+                        "vendeur": vendeur
+                    }
+                    log_action(code_input, "LOGIN", f"Succès - {client_name}")
+                    st.rerun()
+                else:
+                    st.error("⛔ Code Invalide ou Expiré.")
+                    st.markdown("**Besoin d'un accès ? Contactez le Dr. Tchamdjio au 671 89 40 95**")
+        else:
+            st.warning("Veuillez saisir un code.")
+
+# ==========================================
+# 6. ÉCRAN 2 : LE CALCULATEUR (MAIN APP)
+# ==========================================
+
+else:
+    # --- HEADER ---
+    c1, c2 = st.columns([3, 1])
+    with c1:
+        st.caption(f"👤 Client : **{st.session_state.user_info['nom']}**")
+    with c2:
+        if st.button("Déconnexion", type="secondary"):
+            st.session_state.authenticated = False
+            st.session_state.audit_result = None
+            st.rerun()
+            
+    st.markdown("---")
+    st.header("⛽ AUDIT THERMODYNAMIQUE")
+
+    # --- LEAD MAGNET (DONNÉES) ---
+    with st.expander("📋 Informations du Site (Requis)", expanded=True):
+        col_a, col_b = st.columns(2)
+        with col_a:
+            entreprise_audit = st.text_input("Nom du Site / Engin", placeholder="Ex: Usine Bassa / Camion 01")
+        with col_b:
+            contact_whatsapp = st.text_input("Numéro WhatsApp", placeholder="Pour recevoir le rapport")
+
+    # --- SAISIE TECHNIQUE ---
+    st.subheader("1. Paramètres Moteur")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        puissance_kva = st.number_input("Puissance Nominale (kVA)", min_value=10, value=100, step=10)
+        heures_marche = st.number_input("Heures de Fonctionnement", min_value=1, value=24)
+    with col2:
+        litres_declares = st.number_input("Carburant Déclaré (Litres)", min_value=0.0, value=50.0)
+        prix_litre = st.number_input("Prix du Litre (FCFA)", value=750, step=50)
+
+    # --- RÉGLAGES EXPERTS (Cos Phi) ---
+    with st.expander("⚙️ Paramètres Avancés (Ingénierie)"):
+        st.caption("Ne modifier que si vous êtes technicien.")
+        c_phi, c_dens = st.columns(2)
+        with c_phi:
+            cos_phi = st.slider("Cos φ (Facteur de Puissance)", 0.6, 1.0, 0.8, 0.05)
+        with c_dens:
+            densite_fuel = st.number_input("Densité Carburant", value=0.85, step=0.01)
+
+    # --- CALCUL DE CHARGE (AMPÈRES) ---
+    st.subheader("2. Calcul de la Charge")
+    method_charge = st.radio("Méthode de relevé :", ["👁️ Visuelle (Approximatif)", "⚡ Ampèremètre (Précis)"], horizontal=True)
+
+    if method_charge == "⚡ Ampèremètre (Précis)":
+        # I = S / (U * sqrt(3)) -> Pour 400V : I = kVA * 1.44
+        i_max = puissance_kva * 1.44
+        st.info(f"Intensité Max Théorique : **{i_max:.0f} A**")
+        ampere_lu = st.number_input("Ampérage Moyen Lu (A)", min_value=0.0, max_value=float(i_max*1.2))
+        
+        if i_max > 0:
+            charge_calculee = ampere_lu / i_max
+            st.metric("Taux de Charge Calculé", f"{charge_calculee*100:.1f} %")
+            facteur_charge = charge_calculee
+        else:
+            facteur_charge = 0.5
+    else:
+        charge_select = st.select_slider(
+            "Niveau d'activité observé",
+            options=["Faible (25%)", "Moyen (50%)", "Élevé (75%)", "Max (90%)"],
+            value="Moyen (50%)"
+        )
+        mapping = {"Faible (25%)": 0.25, "Moyen (50%)": 0.50, "Élevé (75%)": 0.75, "Max (90%)": 0.90}
+        facteur_charge = mapping[charge_select]
+
+    # --- BOUTON CALCUL ---
     st.markdown("<br>", unsafe_allow_html=True)
-    password = st.text_input("Entrez votre Code d'Accès", type="password", placeholder="1234...")
-    
-    if st.button("DÉVERROUILLER", type="secondary"):
-        if password == MOT_DE_PASSE_SECRET:
-            st.session_state.authenticated = True
-            st.rerun() # Recharge la page pour afficher l'app
+    if st.button("LANCER L'ANALYSE 🔎", type="primary", use_container_width=True):
+        if not entreprise_audit:
+            st.warning("Veuillez entrer le nom du Site/Entreprise.")
         else:
-            st.error("Code incorrect.")
+            # CŒUR DE CALCUL (WILLANS)
+            # P_elec = P_kva * cos_phi
+            # Conso (L/h) approx = (0.1 * P_nom + 0.9 * P_nom * charge) * CSP_L_kWh
+            # CSP standard diesel = 0.24 L/kWh (variable selon moteurs mais moyenne robuste)
             
-    # Zone de Vente (Si pas de code)
-    st.markdown("""
-    <div class="lock-screen">
-        <h3>🛑 Vous n'avez pas de code ?</h3>
-        <p>Cet outil professionnel permet de détecter les vols de carburant sur vos groupes électrogènes.</p>
-        <p style="color: #FACC15; font-weight: bold;">PRIX : 5 000 FCFA (À vie)</p>
-        <hr style="border-color: #334155;">
-        <small>Pour obtenir votre code immédiat :</small><br>
-        <b>Contactez le Dr Tchamdjio sur WhatsApp</b>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    # Lien WhatsApp direct
-    whatsapp_url = "https://wa.me/237671894095?text=Bonjour%20Doc,%20je%20veux%20le%20code%20pour%20GEN-CONTROL." 
-    # REMPLACEZ LE NUMERO CI-DESSUS PAR LE VÔTRE !
-    
-    st.markdown(f'<div style="text-align:center"><a href="{whatsapp_url}" target="_blank" style="text-decoration:none;"><button style="background-color:#25D366; color:white; border:none; padding:10px 20px; border-radius:5px; font-weight:bold; margin-top:10px;">👉 ACHETER MON CODE</button></a></div>', unsafe_allow_html=True)
-    
-    return False
+            puissance_kw = puissance_kva * cos_phi
+            csp = 0.24 # Consommation Spécifique Moyenne (L/kWh)
+            
+            conso_vide = puissance_kw * csp * 0.1
+            conso_charge = puissance_kw * csp * 0.9 * facteur_charge
+            
+            conso_h_theo = conso_vide + conso_charge
+            conso_total_theo = conso_h_theo * heures_marche
+            
+            diff = litres_declares - conso_total_theo
+            percent_diff = (diff / conso_total_theo) * 100 if conso_total_theo > 0 else 0
+            perte_financiere = diff * prix_litre
 
-# ==========================================
-# 3. APPLICATION (VISIBLE SEULEMENT SI DÉVERROUILLÉE)
-# ==========================================
+            # Sauvegarde
+            st.session_state.audit_result = {
+                "theo": conso_total_theo,
+                "reel": litres_declares,
+                "diff": diff,
+                "pct": percent_diff,
+                "cash": perte_financiere,
+                "site": entreprise_audit
+            }
+            
+            # Log
+            log_text = f"Ecart {percent_diff:.1f}% | {perte_financiere:.0f} F | {entreprise_audit}"
+            log_action(st.session_state.user_info['code'], "CALCUL", log_text)
 
-if check_password():
-    # --- Si on arrive ici, c'est que le code est bon ---
-    
-    st.title("⛽ GEN-CONTROL")
-    st.caption("L'Anti-Vol de Carburant de Poche | Mode Expert")
-    
-    if st.button("🔒 Verrouiller l'écran"):
-        st.session_state.authenticated = False
-        st.rerun()
-
-    st.write("")
-
-    # Formulaire compact
-    with st.container():
-        col1, col2 = st.columns(2)
-        with col1:
-            kva = st.number_input("Puissance Groupe (kVA)", value=100, step=10)
-        with col2:
-            hours = st.number_input("Heures de marche", value=5.0, step=0.5)
-
-        st.write("")
-        st.markdown("**📊 Charge Estimée (%)**")
-        load_percent = st.slider("Niveau de charge", 0, 100, 50)
+    # --- RÉSULTATS ---
+    if st.session_state.audit_result:
+        res = st.session_state.audit_result
+        st.markdown("---")
         
-        if load_percent < 30:
-            st.caption("⚠️ Risque d'encrassement (Sous-charge)")
-        elif load_percent > 80:
-            st.caption("🔥 Surcharge possible")
-
-        st.write("")
-        st.markdown("**⛽ Carburant Déclaré (Litres)**")
-        fuel_declared = st.number_input("Saisir la conso annoncée", value=0.0, step=5.0)
-
-        st.divider()
-        check_btn = st.button("🕵🏼 SCANNER MAINTENANT", type="primary")
-
-    if check_btn:
-        # Algorithme Marcus
-        kw_rating = kva * 0.8 
-        load_factor = load_percent / 100
-        conso_horaire_theorique = (kw_rating * 0.24) * (0.25 + (0.75 * load_factor))
-        total_theorique = conso_horaire_theorique * hours
-        ecart = fuel_declared - total_theorique
-        prix_litre = 800 
-        argent_perdu = ecart * prix_litre
-
-        st.write("")
-        
-        if fuel_declared == 0:
-            st.info(f"ℹ️ Conso attendue : **{conso_horaire_theorique:.1f} L/h**")
-            
-        elif ecart > (total_theorique * 0.15): 
-            st.markdown("""<div style="background-color: #450A0A; border: 2px solid #EF4444; padding: 15px; border-radius: 10px; text-align: center;"><h2 style="color: #EF4444; margin:0;">🚨 SUSPICION DE VOL</h2><p style="color: #FECACA;">Surconsommation détectée</p></div>""", unsafe_allow_html=True)
-            c1, c2 = st.columns(2)
-            with c1: st.markdown(f"""<div class="result-card"><small>Théorique</small><h3 style="color:#4ADE80">{total_theorique:.1f} L</h3></div>""", unsafe_allow_html=True)
-            with c2: st.markdown(f"""<div class="result-card"><small>Déclaré</small><h3 style="color:#F87171">{fuel_declared:.1f} L</h3></div>""", unsafe_allow_html=True)
-            st.markdown(f"""<div style="text-align: center; margin-top: 10px;"><span style="font-size: 20px;">Manquant : <b>{ecart:.1f} Litres</b></span><br><span style="font-size: 28px; font-weight: bold; color: #FACC15;">💸 ~{argent_perdu:,.0f} FCFA</span><br><small>Perdus sur cette période</small></div>""", unsafe_allow_html=True)
-            
-        elif ecart < -(total_theorique * 0.15):
-            st.warning("⚠️ Consommation anormalement BASSE. Vérifiez les heures.")
-            st.metric("Conso Théorique", f"{total_theorique:.1f} L")
-            
+        # Logique Couleur
+        if res['diff'] > (res['theo'] * 0.10):
+            status_color = "red"
+            status_msg = "🚨 ANOMALIE CRITIQUE (VOL SUSPECTÉ)"
+            icon = "❌"
+        elif res['diff'] < -(res['theo'] * 0.10):
+            status_color = "orange"
+            status_msg = "⚠️ SOUS-CONSOMMATION (Vérifier Saisie)"
+            icon = "❓"
         else:
-            st.markdown("""<div style="background-color: #064E3B; border: 2px solid #34D399; padding: 15px; border-radius: 10px; text-align: center;"><h2 style="color: #34D399; margin:0;">✅ CONSO NORMALE</h2><p style="color: #D1FAE5;">Les chiffres sont cohérents.</p></div>""", unsafe_allow_html=True)
-            st.metric("Conso Théorique", f"{total_theorique:.1f} L", delta=f"{ecart:.1f} L")
+            status_color = "green"
+            status_msg = "✅ CONSOMMATION COHÉRENTE"
+            icon = "✔️"
 
-    st.markdown("<br><div style='text-align: center; color: #475569;'><small>GEN-CONTROL v1.0 | DI-SOLUTIONS © 2025</small></div>", unsafe_allow_html=True)
+        st.markdown(f"<h3 style='color:{status_color}; text-align:center; border:2px solid {status_color}; padding:10px; border-radius:10px;'>{status_msg}</h3>", unsafe_allow_html=True)
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Théorique (Willans)", f"{res['theo']:.1f} L")
+        c2.metric("Déclaré (Jauge)", f"{res['reel']:.1f} L")
+        c3.metric("Écart", f"{res['diff']:.1f} L", delta_color="inverse" if status_color=="red" else "normal")
+
+        if status_color == "red":
+            st.error(f"PERTE FINANCIÈRE ESTIMÉE : {res['cash']:,.0f} FCFA")
+            
+            # BOUTON PANIQUE WHATSAPP
+            msg_wa = f"Bonjour Dr Tchamdjio. Alerte sur site {res['site']}. Ecart de {res['pct']:.1f}% ({res['cash']:.0f} FCFA). Besoin d'expertise."
+            link_wa = f"https://wa.me/237671894095?text={urllib.parse.quote(msg_wa)}"
+            st.link_button("🆘 SIGNALER CETTE ANOMALIE À L'EXPERT", link_wa, type="primary", use_container_width=True)
+        
+        # RAPPORT TEXTE A COPIER
+        st.text_area("📄 Rapport à copier pour la Direction :", 
+                     f"""AUDIT ÉNERGÉTIQUE GEN-CONTROL
+Date : {datetime.now().strftime('%d/%m/%Y')}
+Site : {res['site']}
+---------------------------
+Puissance : {puissance_kva} kVA
+Charge Estimée : {facteur_charge*100:.0f}%
+Heures : {heures_marche}h
+---------------------------
+⛽ Conso. Déclarée : {res['reel']:.1f} L
+📉 Conso. Théorique : {res['theo']:.1f} L
+⚖️ ÉCART : {res['diff']:.1f} L ({res['pct']:.1f}%)
+💰 IMPACT : {res['cash']:,.0f} FCFA
+---------------------------
+Verdict : {status_msg}
+Validé par DI-SOLUTIONS""", height=250)
