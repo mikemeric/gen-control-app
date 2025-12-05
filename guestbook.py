@@ -4,10 +4,15 @@ import pandas as pd
 from datetime import datetime
 
 # ==========================================
-# CONFIGURATION & DESIGN FESTIF
+# 1. CONFIGURATION & DESIGN FESTIF
 # ==========================================
-st.set_page_config(page_title="LIVRE D'OR GIM", page_icon="✍️", layout="centered")
+st.set_page_config(
+    page_title="LIVRE D'OR GIM", 
+    page_icon="✍️", 
+    layout="centered"
+)
 
+# CSS pour le style "Cérémonie"
 st.markdown("""
 <style>
     .stApp {
@@ -19,6 +24,15 @@ st.markdown("""
         text-align: center;
         font-family: 'Arial Black', sans-serif;
         text-transform: uppercase;
+        margin-bottom: 0;
+    }
+    .subtitle {
+        text-align: center;
+        color: #FF6600;
+        font-weight: bold;
+        font-size: 18px;
+        margin-top: -10px;
+        margin-bottom: 30px;
     }
     .message-card {
         background-color: #f0f8ff;
@@ -39,34 +53,49 @@ st.markdown("""
         border-radius: 8px;
         font-weight: bold;
         width: 100%;
+        padding: 10px;
     }
+    div.stButton > button:first-child:hover {
+        background-color: #FF6600;
+        border: none;
+    }
+    
+    /* Cacher le menu hamburger pour faire plus "App" */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# CONNEXION (MÊME QUE GEN-CONTROL)
+# 2. CONNEXION GOOGLE SHEETS
 # ==========================================
 try:
     conn = st.connection("gsheets", type=GSheetsConnection)
-except:
-    st.error("Erreur de connexion au Livre d'Or.")
+except Exception as e:
+    st.error("⚠️ Erreur de connexion au Livre d'Or. Vérifiez Internet.")
     st.stop()
 
 # ==========================================
-# HEADER
+# 3. HEADER AVEC LOGO LOCAL
 # ==========================================
-# Remplacement de l'image par un Titrepropre
-st.markdown("""
-    <div style="text-align: center; padding: 20px; background-color: #003366; color: white; border-radius: 10px; margin-bottom: 20px;">
-        <h1 style="margin:0; font-size: 40px;">📖 LIVRE D'OR</h1>
-        <p style="margin:0; font-size: 18px; color: #FF6600;">GIM 2025</p>
-    </div>
-""", unsafe_allow_html=True)
+# On utilise des colonnes pour centrer et maîtriser la taille du logo
+c1, c2, c3 = st.columns([3, 2, 3])
+
+with c2:
+    try:
+        # Affiche le logo qui est dans le même dossier sur GitHub
+        st.image("logo_gim.jpg", use_column_width=True)
+    except:
+        # Fallback au cas où l'image n'est pas encore uploadée
+        st.warning("Logo en chargement...")
+
+st.markdown("<h1>📖 LIVRE D'OR</h1>", unsafe_allow_html=True)
+st.markdown("<p class='subtitle'>CÉRÉMONIE DE PARRAINAGE GIM 2025</p>", unsafe_allow_html=True)
 
 # ==========================================
-# FORMULAIRE DE SIGNATURE
+# 4. FORMULAIRE DE SIGNATURE
 # ==========================================
-with st.expander("✍️ SIGNER LE LIVRE D'OR (Cliquer ici)", expanded=True):
+with st.expander("✍️ LAISSER UN MESSAGE (Cliquer ici)", expanded=True):
     with st.form("guestbook_form", clear_on_submit=True):
         c1, c2 = st.columns(2)
         with c1:
@@ -75,12 +104,12 @@ with st.expander("✍️ SIGNER LE LIVRE D'OR (Cliquer ici)", expanded=True):
         with c2:
             entreprise = st.text_input("Entreprise / Poste *")
         
-        message = st.text_area("Votre message pour les étudiants / Le département *")
+        message = st.text_area("Votre message pour les étudiants / Le département *", placeholder="Félicitations aux filleuls...")
         
         if st.form_submit_button("PUBLIER MON MESSAGE 🚀"):
             if nom and entreprise and message:
                 try:
-                    # Lecture des données existantes
+                    # Lecture des données existantes (sans cache pour être à jour)
                     df = conn.read(worksheet="guestbook", ttl=0)
                     
                     # Création nouvelle ligne
@@ -96,7 +125,7 @@ with st.expander("✍️ SIGNER LE LIVRE D'OR (Cliquer ici)", expanded=True):
                     updated_df = pd.concat([df, new_row], ignore_index=True)
                     conn.update(worksheet="guestbook", data=updated_df)
                     
-                    st.success("Merci ! Votre message est affiché.")
+                    st.success("Merci ! Votre message est affiché sur le mur.")
                     st.rerun()
                 except Exception as e:
                     st.error(f"Erreur d'enregistrement : {e}")
@@ -104,10 +133,10 @@ with st.expander("✍️ SIGNER LE LIVRE D'OR (Cliquer ici)", expanded=True):
                 st.warning("Veuillez remplir le Nom, l'Entreprise et le Message.")
 
 # ==========================================
-# MUR DES MESSAGES (DISPLAY)
+# 5. MUR DES MESSAGES (DISPLAY)
 # ==========================================
 st.markdown("---")
-st.subheader("💬 ILS SONT LÀ AUJOURD'HUI...")
+st.markdown("<h3 style='text-align: center; color: #003366;'>💬 ILS SONT LÀ AUJOURD'HUI...</h3>", unsafe_allow_html=True)
 
 if st.button("🔄 Actualiser le mur"):
     st.rerun()
@@ -119,7 +148,7 @@ try:
     if not df_display.empty:
         # On inverse pour avoir le dernier en haut
         for index, row in df_display.iloc[::-1].iterrows():
-            promo_txt = f" | Promo {row['promo']}" if row['promo'] else ""
+            promo_txt = f" | Promo {row['promo']}" if pd.notna(row['promo']) and row['promo'] != "" else ""
             
             st.markdown(f"""
             <div class="message-card">
@@ -132,7 +161,9 @@ try:
         st.info("Soyez le premier à écrire un message !")
         
 except Exception:
-    st.info("Le livre d'or est prêt à recevoir vos signatures.")
+    st.info("Chargement des messages...")
 
-# FOOTER
-st.markdown("<div style='text-align: center; margin-top: 30px; font-size: 0.8em; color: #888;'>Digital Guestbook by DI-SOLUTIONS</div>", unsafe_allow_html=True)
+# ==========================================
+# 6. FOOTER
+# ==========================================
+st.markdown("<div style='text-align: center; margin-top: 50px; border-top: 1px solid #eee; padding-top: 20px; font-size: 0.8em; color: #888;'>Digital Guestbook by DI-SOLUTIONS</div>", unsafe_allow_html=True)
