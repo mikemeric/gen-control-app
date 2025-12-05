@@ -213,21 +213,22 @@ else:
             elif "75%" in scenario: facteur_charge = 0.75
             elif "90%" in scenario: facteur_charge = 0.90
 
-    else: # CAMION
+    else: # CAMION (CORRIGÉ POUR LA ROUTE)
         with col_tech1:
-            puissance_input = st.number_input("PUISSANCE MOTEUR (CV)", min_value=50, value=300, step=10)
+            puissance_input = st.number_input("PUISSANCE MOTEUR (CV)", min_value=50, value=500, step=10)
             puissance_kw_calcul = puissance_input * 0.7355
         with col_tech2:
+            # NOUVEAUX POURCENTAGES RÉALISTES
             scenario = st.selectbox("TYPE DE MISSION", [
-                "🛣️ Route Plate / Vide / Eco - 40%",
-                "🏙️ Ville / Livraison / Mixte - 50%",
-                "📦 Route Chargée / Vallonnée - 70%",
-                "🚜 Chantier TP / Terrain difficile - 80%"
+                "🛣️ Route Plate / Vide / Eco (Moyenne) - 15%",
+                "🏙️ Ville / Livraison / Mixte (Moyenne) - 20%",
+                "📦 Route Chargée / Vallonnée (Moyenne) - 25%",
+                "🚜 Chantier TP / Force / Toupie (Intensif) - 45%"
             ])
-            if "40%" in scenario: facteur_charge = 0.40
-            elif "50%" in scenario: facteur_charge = 0.50
-            elif "70%" in scenario: facteur_charge = 0.70
-            elif "80%" in scenario: facteur_charge = 0.80
+            if "15%" in scenario: facteur_charge = 0.15
+            elif "20%" in scenario: facteur_charge = 0.20
+            elif "25%" in scenario: facteur_charge = 0.25
+            elif "45%" in scenario: facteur_charge = 0.45
 
     # 3. DONNÉES CONSO
     st.markdown("<br>", unsafe_allow_html=True)
@@ -249,19 +250,15 @@ else:
             # --- LOGIQUE DE VERROUILLAGE PREMIERE FOIS ---
             if not st.session_state.user_info.get('machine'):
                 try:
-                    # Écriture du verrouillage dans GSheet
                     df_users = conn.read(worksheet="users", ttl=0)
-                    # On cherche la ligne du code actuel
                     mask = df_users['code_acces'].astype(str).str.strip() == st.session_state.user_info['code']
                     if mask.any():
                         idx = df_users.index[mask][0]
                         df_users.at[idx, 'machine_lock'] = entreprise
                         conn.update(worksheet="users", data=df_users)
-                        # Mise à jour locale
                         st.session_state.user_info['machine'] = entreprise
-                        st.rerun() # On recharge pour figer le champ
+                        st.rerun()
                 except Exception as e:
-                    # En prod on continue même si l'écriture échoue pour ne pas bloquer le client
                     pass
 
             # --- MOTEUR DE CALCUL ---
