@@ -55,8 +55,13 @@ except:
 # ==========================================
 # HEADER
 # ==========================================
-st.image("https://via.placeholder.com/800x200/003366/FFFFFF?text=LIVRE+D'OR+GIM+2025", use_column_width=True)
-st.markdown("<h3 style='text-align: center; color: #FF6600;'>Laissez une trace pour les générations futures</h3>", unsafe_allow_html=True)
+# Remplacement de l'image par un Titrepropre
+st.markdown("""
+    <div style="text-align: center; padding: 20px; background-color: #003366; color: white; border-radius: 10px; margin-bottom: 20px;">
+        <h1 style="margin:0; font-size: 40px;">📖 LIVRE D'OR</h1>
+        <p style="margin:0; font-size: 18px; color: #FF6600;">GIM 2025</p>
+    </div>
+""", unsafe_allow_html=True)
 
 # ==========================================
 # FORMULAIRE DE SIGNATURE
