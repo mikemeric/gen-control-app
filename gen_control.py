@@ -84,7 +84,7 @@ if 'audit_result' not in st.session_state:
     st.session_state.audit_result = None
 
 # ==========================================
-# 4. LOGIQUE MÉTIER
+# 4. LOGIQUE MÉTIER (AVEC VERROUILLAGE)
 # ==========================================
 def log_action(code, action, details="-"):
     try:
@@ -102,14 +102,27 @@ def log_action(code, action, details="-"):
 
 def check_login(code_input):
     try:
-        df_users = conn.read(worksheet="users", ttl=0, usecols=[0, 1, 2, 3])
+        # On lit 5 colonnes (A à E) pour avoir 'machine_lock'
+        df_users = conn.read(worksheet="users", ttl=0, usecols=[0, 1, 2, 3, 4])
         df_users['code_acces'] = df_users['code_acces'].astype(str).str.strip()
-        user_row = df_users[(df_users['code_acces'] == code_input) & (df_users['statut'] == 'ACTIF')]
+        
+        user_row = df_users[
+            (df_users['code_acces'] == code_input) & 
+            (df_users['statut'] == 'ACTIF')
+        ]
+        
         if not user_row.empty:
-            return True, user_row.iloc[0]['client_nom']
-        return False, None
+            # Récupération du verrouillage machine
+            machine_lock = user_row.iloc[0].get('machine_lock')
+            if pd.isna(machine_lock) or str(machine_lock).strip() == "":
+                machine_lock = None
+            else:
+                machine_lock = str(machine_lock)
+                
+            return True, user_row.iloc[0]['client_nom'], machine_lock
+        return False, None, None
     except:
-        return False, None
+        return False, None, None
 
 # ==========================================
 # 5. ÉCRAN LOGIN
@@ -125,10 +138,14 @@ if not st.session_state.authenticated:
         code_input = st.text_input("CODE D'ACCÈS LICENCE", placeholder="Ex: GEN-XXXX").strip()
         if st.button("DÉVERROUILLER L'ACCÈS 🔓", type="primary", use_container_width=True):
             if code_input:
-                is_valid, client_name = check_login(code_input)
+                is_valid, client_name, machine_fixe = check_login(code_input)
                 if is_valid:
                     st.session_state.authenticated = True
-                    st.session_state.user_info = {"code": code_input, "nom": client_name}
+                    st.session_state.user_info = {
+                        "code": code_input, 
+                        "nom": client_name,
+                        "machine": machine_fixe # Stockage du verrou
+                    }
                     log_action(code_input, "LOGIN", f"Succès - {client_name}")
                     st.rerun()
                 else:
@@ -142,6 +159,9 @@ else:
     with st.sidebar:
         st.success(f"👤 **{st.session_state.user_info['nom']}**")
         st.caption(f"Licence : {st.session_state.user_info['code']}")
+        if st.session_state.user_info.get('machine'):
+             st.info(f"🔒 Lié à : {st.session_state.user_info['machine']}")
+        
         if st.button("Déconnexion"):
             st.session_state.authenticated = False
             st.session_state.audit_result = None
@@ -152,10 +172,20 @@ else:
     st.caption("Powered by Cabinet DI-SOLUTIONS")
     st.markdown("---")
     
-    # 1. IDENTIFICATION (En Haut, clair et net)
+    # 1. IDENTIFICATION (AVEC VERROUILLAGE)
     c1, c2 = st.columns(2)
     with c1:
-        entreprise = st.text_input("SITE / IMMATRICULATION", placeholder="Ex: Usine A ou LT 123 AB")
+        # Si le code est déjà verrouillé sur une machine
+        if st.session_state.user_info.get('machine'):
+            entreprise = st.text_input("SITE / IMMATRICULATION (Verrouillé)", 
+                                     value=st.session_state.user_info['machine'], 
+                                     disabled=True)
+        else:
+            # Première utilisation : on laisse saisir
+            entreprise = st.text_input("SITE / IMMATRICULATION", placeholder="Ex: Groupe 100kVA")
+            if entreprise:
+                st.warning("⚠️ Attention : Ce nom sera lié définitivement à ce code après le premier audit.")
+
     with c2:
         contact = st.text_input("WHATSAPP CONTACT", placeholder="6XX XX XX XX")
 
@@ -214,8 +244,27 @@ else:
     st.markdown("<br>", unsafe_allow_html=True)
     if st.button("LANCER L'AUDIT DE SÉCURITÉ 🚨", type="primary", use_container_width=True):
         if not entreprise:
-            st.warning("Nom du site requis.")
+            st.error("Nom du site requis pour lancer l'audit.")
         else:
+            # --- LOGIQUE DE VERROUILLAGE PREMIERE FOIS ---
+            if not st.session_state.user_info.get('machine'):
+                try:
+                    # Écriture du verrouillage dans GSheet
+                    df_users = conn.read(worksheet="users", ttl=0)
+                    # On cherche la ligne du code actuel
+                    mask = df_users['code_acces'].astype(str).str.strip() == st.session_state.user_info['code']
+                    if mask.any():
+                        idx = df_users.index[mask][0]
+                        df_users.at[idx, 'machine_lock'] = entreprise
+                        conn.update(worksheet="users", data=df_users)
+                        # Mise à jour locale
+                        st.session_state.user_info['machine'] = entreprise
+                        st.rerun() # On recharge pour figer le champ
+                except Exception as e:
+                    # En prod on continue même si l'écriture échoue pour ne pas bloquer le client
+                    pass
+
+            # --- MOTEUR DE CALCUL ---
             csp = 0.24
             conso_h_theo = puissance_kw_calcul * csp * (0.1 + (0.9 * facteur_charge))
             total_theo = conso_h_theo * heures
