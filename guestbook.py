@@ -76,24 +76,36 @@ except Exception as e:
     st.stop()
 
 # ==========================================
-# 3. HEADER AVEC LOGO LOCAL
+# 3. SIDEBAR (QR CODE AUTOMATIQUE)
 # ==========================================
-# On utilise des colonnes pour centrer et maîtriser la taille du logo
-c1, c2, c3 = st.columns([3, 2, 3])
+with st.sidebar:
+    st.image("logo_gim.jpg", use_column_width=True)
+    st.markdown("### 📱 SCANNEZ-MOI")
+    st.info("Invitez les autres parrains à signer le livre d'or en scannant ce code.")
+    
+    # ASTUCE : Génération automatique du QR Code de la page actuelle
+    # On utilise l'API gratuite qrserver.com
+    # Note : Une fois déployé, copiez l'URL de votre app ci-dessous
+    APP_URL = "https://gim-guestbook.streamlit.app" # <-- METTEZ VOTRE VRAI LIEN ICI SI CONNU
+    
+    qr_code_url = f"https://api.qrserver.com/v1/create-qr-code/?size=200x200&data={APP_URL}"
+    st.image(qr_code_url, caption="Accès Direct")
 
+# ==========================================
+# 4. HEADER AVEC LOGO LOCAL
+# ==========================================
+c1, c2, c3 = st.columns([3, 2, 3])
 with c2:
     try:
-        # Affiche le logo qui est dans le même dossier sur GitHub
         st.image("logo_gim.jpg", use_column_width=True)
     except:
-        # Fallback au cas où l'image n'est pas encore uploadée
-        st.warning("Logo en chargement...")
+        pass # Fallback silencieux
 
 st.markdown("<h1>📖 LIVRE D'OR</h1>", unsafe_allow_html=True)
 st.markdown("<p class='subtitle'>CÉRÉMONIE DE PARRAINAGE GIM 2025</p>", unsafe_allow_html=True)
 
 # ==========================================
-# 4. FORMULAIRE DE SIGNATURE
+# 5. FORMULAIRE DE SIGNATURE
 # ==========================================
 with st.expander("✍️ LAISSER UN MESSAGE (Cliquer ici)", expanded=True):
     with st.form("guestbook_form", clear_on_submit=True):
@@ -109,10 +121,7 @@ with st.expander("✍️ LAISSER UN MESSAGE (Cliquer ici)", expanded=True):
         if st.form_submit_button("PUBLIER MON MESSAGE 🚀"):
             if nom and entreprise and message:
                 try:
-                    # Lecture des données existantes (sans cache pour être à jour)
                     df = conn.read(worksheet="guestbook", ttl=0)
-                    
-                    # Création nouvelle ligne
                     new_row = pd.DataFrame([{
                         "date": datetime.now().strftime("%H:%M"),
                         "nom": nom,
@@ -120,11 +129,8 @@ with st.expander("✍️ LAISSER UN MESSAGE (Cliquer ici)", expanded=True):
                         "entreprise": entreprise,
                         "message": message
                     }])
-                    
-                    # Concaténation et Sauvegarde
                     updated_df = pd.concat([df, new_row], ignore_index=True)
                     conn.update(worksheet="guestbook", data=updated_df)
-                    
                     st.success("Merci ! Votre message est affiché sur le mur.")
                     st.rerun()
                 except Exception as e:
@@ -133,7 +139,7 @@ with st.expander("✍️ LAISSER UN MESSAGE (Cliquer ici)", expanded=True):
                 st.warning("Veuillez remplir le Nom, l'Entreprise et le Message.")
 
 # ==========================================
-# 5. MUR DES MESSAGES (DISPLAY)
+# 6. MUR DES MESSAGES (DISPLAY)
 # ==========================================
 st.markdown("---")
 st.markdown("<h3 style='text-align: center; color: #003366;'>💬 ILS SONT LÀ AUJOURD'HUI...</h3>", unsafe_allow_html=True)
@@ -142,14 +148,10 @@ if st.button("🔄 Actualiser le mur"):
     st.rerun()
 
 try:
-    # Lecture sans cache pour avoir le direct
     df_display = conn.read(worksheet="guestbook", ttl=0)
-    
     if not df_display.empty:
-        # On inverse pour avoir le dernier en haut
         for index, row in df_display.iloc[::-1].iterrows():
             promo_txt = f" | Promo {row['promo']}" if pd.notna(row['promo']) and row['promo'] != "" else ""
-            
             st.markdown(f"""
             <div class="message-card">
                 <div class="author">{row['nom']} <span style="color:#FF6600;">{promo_txt}</span></div>
@@ -159,11 +161,10 @@ try:
             """, unsafe_allow_html=True)
     else:
         st.info("Soyez le premier à écrire un message !")
-        
 except Exception:
     st.info("Chargement des messages...")
 
 # ==========================================
-# 6. FOOTER
+# 7. FOOTER
 # ==========================================
 st.markdown("<div style='text-align: center; margin-top: 50px; border-top: 1px solid #eee; padding-top: 20px; font-size: 0.8em; color: #888;'>Digital Guestbook by DI-SOLUTIONS</div>", unsafe_allow_html=True)
